@@ -10,9 +10,9 @@ All cars, teams, drivers, circuits and liveries are fictional. There is no offic
 
 - **5 open-wheel cars**, classes D to S: Kestrel F4 (free), Vanta R2 (15,000), Strata FX (60,000), Zephyr XR (200,000) and Vyron Apex S (600,000 V-Coins). Each car has its own stats for top speed, acceleration, cornering, braking, downforce and weight, plus a livery editor (3 colours and 5 patterns).
 - **3 original circuits:**
-  - Velocity GP: modern, 4.9 km, long straights.
+  - Velocity GP: modern, with long straights.
   - Neon Harbour: night street circuit with tight corners, neon and a harbour.
-  - Apex Mountain: 70 m of elevation change.
+  - Apex Mountain: real elevation change through the hills.
 
   Every circuit has a start/finish line with a 5-light gantry, a grid, a pit lane, 3 timing sectors, kerbs, track limits (off-track slows you and invalidates the lap), braking boards and a mini-map.
 - **Physics:** arcade-sim handling with downforce-dependent grip, drag, braking limits, slides, kerbs, gravity on slopes, barrier and car-to-car collisions, slipstream, an 8-speed gearbox (auto or manual) and tyre wear.
