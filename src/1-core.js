@@ -22,7 +22,7 @@ const SET_KEY = 'vyroniq-settings-v1';
 const defaults = {
   gfx: 'auto', sound: true, volume: 0.8, music: false,
   hc: false, cb: false, rm: prefersRM, announce: true, sens: 1, tilt: false, btnSize: 'm', leftHanded: false, touch: 'auto',
-  tc: true, abs: true, line: true, autoGear: true, steerAssist: true, autoLaunch: false, camera: 'chase', units: 'kmh'
+  tc: true, abs: true, line: true, autoGear: true, steerAssist: true, driftTap: true, autoLaunch: false, camera: 'chase', units: 'kmh'
 };
 let settings = Object.assign({}, defaults);
 try { Object.assign(settings, JSON.parse(localStorage.getItem(SET_KEY) || '{}')); } catch (e) { }

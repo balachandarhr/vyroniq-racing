@@ -99,12 +99,12 @@ function makeCar3D(carId, liv, helmet, ghost) {
   const wheels = [], rings = [], ringMat = new THREE.MeshBasicMaterial({ color: 0xffd23f });
   const W = [[0.86, 0.33, g.zf, 0.3, true], [-0.86, 0.33, g.zf, 0.3, true], [0.84, 0.36, g.zr, 0.4, false], [-0.84, 0.36, g.zr, 0.4, false]];
   for (const [x, r, z, w, front] of W) {
-    const steerG = new THREE.Group(); steerG.position.set(x, r, z); chassis.add(steerG);
+    const steerG = new THREE.Group(); steerG.position.set(x, r, z); root.add(steerG); // wheels stay planted while the body rolls and pitches
     const m = new THREE.Mesh(wheelGeo(r, w), ghost ? MAT.ghost : MAT.tyre); m.castShadow = !ghost; steerG.add(m);
     if (!ghost) { const rg = new THREE.Mesh(ringGeo(r, w), ringMat); m.add(rg); rings.push(rg); }
     wheels.push({ g: steerG, m, r, front });
   }
-  root.userData = { chassis, wheels, ringMat, lights: lt, geos: [g.body, g.carbon, g.lights] };
+  root.userData = { chassis, wheels, ringMat, lights: lt, zr: g.zr, geos: [g.body, g.carbon, g.lights] };
   root.rotation.order = 'YXZ';
   return root;
 }

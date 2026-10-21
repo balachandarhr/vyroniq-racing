@@ -5,7 +5,7 @@ async function goFullscreen() {
   try { if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape'); } catch (e) { }
 }
 // ---------------------------------------------------------------- main loop
-let lastT = performance.now(), fpsAvg = 60, fpsLowT = 0, fpsN = 0, fpsAcc = 0, fpsLast = performance.now();
+let lastT = performance.now(), fpsAvg = 60, fpsLowT = 0, fpsHiT = 0, fpsN = 0, fpsAcc = 0, fpsLast = performance.now();
 function loop(now) {
   requestAnimationFrame(loop);
   const real = Math.max(0, (now - lastT) / 1000), dt = Math.min(0.05, real); lastT = now;
@@ -16,7 +16,13 @@ function loop(now) {
   else if (screenId !== 'loading') { renderShowroom(dt, VIEW[screenId] || VIEW.home); Sound.update(null, false); }
   // adaptive quality: drop a level if the real frame rate stays low in a race
   fpsN++; fpsAcc += real; if (now - fpsLast > 1000) { fpsAvg = fpsN / Math.max(0.001, fpsAcc); fpsN = 0; fpsAcc = 0; fpsLast = now; if (window.__vqFps) window.__vqFps(fpsAvg); }
-  if (inRace && screenId === 'hud' && settings.gfx === 'auto' && fpsAvg < 32) { fpsLowT += real; if (fpsLowT > 3 && autoQ !== 'low') { autoQ = autoQ === 'high' ? 'medium' : 'low'; fpsLowT = 0; applyGfx(false); toast(`Graphics lowered to ${autoQ} for a smoother frame rate`); } } else fpsLowT = 0;
+  // auto quality: first trim the render resolution a little, then drop a tier; resolution comes back when frames are smooth again
+  if (inRace && screenId === 'hud' && settings.gfx === 'auto') {
+    if (fpsAvg < 46) { fpsLowT += real; fpsHiT = 0;
+      if (fpsLowT > 2.5) { fpsLowT = 0; if (prScale > 0.7) { prScale = Math.max(0.65, prScale - 0.12); resize3D(); } else if (autoQ !== 'low' && fpsAvg < 36) { autoQ = autoQ === 'high' ? 'medium' : 'low'; applyGfx(false); prScale = 0.85; resize3D(); toast(`Graphics lowered to ${autoQ} for a smoother frame rate`); } } }
+    else if (fpsAvg > 57) { fpsLowT = 0; fpsHiT += real; if (fpsHiT > 6 && prScale < 1) { fpsHiT = 0; prScale = Math.min(1, prScale + 0.1); resize3D(); } }
+    else { fpsLowT = 0; fpsHiT = 0; }
+  } else fpsLowT = 0;
 }
 // ---------------------------------------------------------------- wiring
 function wire() {
@@ -49,7 +55,8 @@ function boot() {
     get R() { return R; }, profile: () => profile, settings, startRace: cfg => beginRace(cfg), show, buyCar, buyUpgrade,
     autopilot: on => { autopilot = on; }, sim: (sec) => { if (!R) return; const steps = Math.round(sec / H_STEP); for (let k = 0; k < steps && R && R.phase !== 'done'; k++) stepRace(H_STEP); },
     state: () => R && { phase: R.phase, t: R.t, lap: R.player.lap, pos: R.player.pos, speed: R.player.speed, prog: R.player.prog, laps: R.laps, off: R.player.off, results: R.results ? { pos: R.results.pos, total: R.results.total, lines: R.results.lines } : null },
-    endTT: () => { if (R && R.tt) { show('hud'); endTimeTrial(); } }, quality: () => ({ q: qName, gpu: gpuName, soft: softGPU }), fps: () => fpsAvg
+    endTT: () => { if (R && R.tt) { show('hud'); endTimeTrial(); } }, quality: () => ({ q: qName, gpu: gpuName, soft: softGPU, pr: renderer.getPixelRatio(), prScale, aa: renderer.getContext().getContextAttributes().antialias }), fps: () => fpsAvg,
+    get T() { return T; }, simFx: (sec, until) => { if (!R) return false; for (let k = 0; k < Math.round(sec / H_STEP); k++) { stepRace(H_STEP); if (!R || R.phase === 'done') return false; for (const c of R.cars) { placeCar3D(c.obj, c, H_STEP); carEffects(c, H_STEP); } updateParticles(H_STEP); updateCamera(R.player, H_STEP, settings.camera); if (until && until(R.player)) return true; } return false; }, bot: fn => { dbgBot = fn; }, touch: touchBtn, profileFor: (c, k) => k === "A" ? assistProfile(c.stats, Math.round(carMu(c, R.env) * 50) / 50) : speedProfile(c.stats, carMu(c, R.env), k || 0.82), cam: () => ({ x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, pr: renderer.getPixelRatio() }), teleport: (f, lat) => { if (!R) return; const P = R.player, i = mod(Math.floor(f * T.n), T.n), p = trackPoint(i, lat || 0, { x: 0, y: 0, z: 0 }); Object.assign(P, { x: p.x, z: p.z, y: p.y, h: T.H[i], i, vx: 0, vz: 0 }); cam.init = false; }
   };
 }
 boot();

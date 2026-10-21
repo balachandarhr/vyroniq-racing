@@ -44,6 +44,14 @@ function onMaterialsChanged() { gKey = ''; if (R && R.cars) { R.cars.forEach(c =
 // ---------------------------------------------------------------- callbacks from physics
 function onPlayerBoost() { Sound.boost(); flash('ENERGY BOOST', 'boost'); announce('Boost'); }
 function onPlayerHit(kind, v) { if (!R || R.t - R.hitT < 0.4) return; R.hitT = R.t; Sound.hit(v); cam.shake = Math.min(0.35, v / 25); const p = R.player; sparks(p.x, p.y, p.z, Math.min(20, 4 + v * 1.5) | 0); if (v > 6) flash(kind === 'BARRIER' ? 'BARRIER HIT' : 'CONTACT', 'warn'); }
+function onDrift(c, on) {
+  if (!R || !c.isPlayer) return;
+  if (on) { c.driftStartE = c.energy; if (R.env.racing) flash('DRIFT', 'boost'); return; }
+  const t = c.driftT || 0; if (t < 0.6 || !R.env.racing) return;
+  const bonus = Math.round(Math.min(14, (t - 0.4) * 6)); if (bonus < 1) return;
+  if (c.boostT <= 0) c.energy = Math.min(100, c.energy + bonus); R.drifts = (R.drifts || 0) + 1;
+  flash(`DRIFT ${t.toFixed(1)} s · +${bonus} ENERGY`, 'good');
+}
 function onPitStop() { Sound.pit(); const t = TYRES[R.player.pit.nextTyre || R.player.tyre]; flash(`PIT STOP · fitting ${t.name}s`, 'info'); announce(`Pit stop, fitting ${t.name} tyres.`); }
 function onPitDone() { Sound.pit(); flash('GO GO GO', 'good'); announce('Pit stop complete.'); }
 // ---------------------------------------------------------------- per-frame update
@@ -71,7 +79,7 @@ function stepRace(h) {
   if (racing) R.t += h;
   // inputs
   for (const c of R.cars) {
-    if (c.isPlayer) { if (autopilot || c.finished) { if (!c.ai) c.ai = {}; c.skill = 0.92; c.aggr = 0.4; c.pace = c.finished ? 0.7 : 0.9; aiDrive(c, R.cars, h, R.env, R.diff); } else readInput(c); }
+    if (c.isPlayer) { if (autopilot || c.finished) { if (!c.ai) c.ai = {}; c.skill = 0.92; c.aggr = 0.4; c.pace = c.finished ? 0.7 : 0.9; aiDrive(c, R.cars, h, R.env, R.diff); } else { readInput(c); if (racing) playerAssist(c); } }
     else { if (c.react > 0) { c.react -= h; c.input.throttle = 0; c.input.brake = 0; continue; } aiDrive(c, R.cars, h, R.env, R.diff); if (c.finished) c.input.throttle *= 0.7; }
   }
   if (R.phase === 'race' && !P.launchDone && !R.tt && R.t > 0) { if (P.input.throttle > 0.5) launchResult(P, R.t - R.lightsOut); else if (R.t - R.lightsOut > 1.2) launchResult(P, 9); }

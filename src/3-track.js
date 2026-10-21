@@ -54,7 +54,17 @@ function speedProfile(stats, mu, decelK) {
   const key = [stats.top, stats.grip, stats.df, stats.brake, mu, decelK].map(v => v.toFixed(3)).join('|');
   if (T.profiles.has(key)) return T.profiles.get(key);
   const n = T.n, V = new Float32Array(n), top = stats.top / 3.6;
-  for (let i = 0; i < n; i++) { const k = Math.abs(T.RK[i]) + 1e-6, den = k - G * mu * stats.df / 3600; V[i] = den <= 0 ? top : Math.min(top, Math.sqrt(G * mu * stats.grip / den)); }
+  for (let i = 0; i < n; i++) { const k = Math.abs(T.RK[i]) + 1e-6, den = k - G * mu * ARC * stats.df / 3600; V[i] = den <= 0 ? top : Math.min(top, Math.sqrt(G * mu * ARC * stats.grip / den)); }
   for (let pass = 0; pass < 2; pass++) for (let j = n - 1; j >= 0; j--) { const i = j, nx = V[mod(i + 1, n)], dec = Math.min(stats.brake, G * mu * (stats.grip + stats.df * (nx / 60) ** 2)) * decelK; V[i] = Math.min(V[i], Math.sqrt(nx * nx + 2 * dec * DS)); }
   T.profiles.set(key, V); return V;
 }
+// cornering profile on the centre line (used by the player's steering assist: casual lines are tighter than the racing line)
+function assistProfile(stats, mu) {
+  const key = 'A|' + [stats.top, stats.grip, stats.df, stats.brake, mu].map(v => v.toFixed(3)).join('|');
+  if (T.profiles.has(key)) return T.profiles.get(key);
+  const n = T.n, V = new Float32Array(n), top = stats.top / 3.6;
+  for (let i = 0; i < n; i++) { let k = 0; for (let d = -4; d <= 4; d++) k = Math.max(k, Math.abs(T.K[mod(i + d, n)])); k = lerp(Math.abs(T.RK[i]), k, 0.8) + 1e-6; const den = k - G * mu * ARC * stats.df / 3600; V[i] = den <= 0 ? top : Math.min(top, Math.sqrt(G * mu * ARC * stats.grip / den)); }
+  for (let pass = 0; pass < 2; pass++) for (let j = n - 1; j >= 0; j--) { const nx = V[mod(j + 1, n)], dec = Math.min(stats.brake, G * mu * (stats.grip + stats.df * (nx / 60) ** 2)) * 0.75; V[j] = Math.min(V[j], Math.sqrt(nx * nx + 2 * dec * DS)); }
+  T.profiles.set(key, V); return V;
+}
+

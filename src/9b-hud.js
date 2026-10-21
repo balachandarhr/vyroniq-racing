@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------- input: keyboard, gamepad, touch, tilt
 const keys = new Set(), touchBtn = {}, pad = { steer: 0, thr: 0, brk: 0, boost: false };
-let tiltRaw = null, tiltCal = null, kSteer = 0, padPrev = [];
+let tiltRaw = null, tiltCal = null, kSteer = 0, tiltS = 0, padPrev = [], dbgBot = null;
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase(); keys.add(k);
   if (screenId === 'hud' || screenId === 'pause') { if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(k)) e.preventDefault(); if (e.repeat) return;
@@ -22,14 +22,39 @@ function readInput(c) {
   const K = k => keys.has(k), inp = c.input, h = H_STEP;
   let st = (K('arrowright') || K('d') ? 1 : 0) - (K('arrowleft') || K('a') ? 1 : 0) + (touchBtn.right ? 1 : 0) - (touchBtn.left ? 1 : 0);
   let thr = (K('arrowup') || K('w') || touchBtn.thr) ? 1 : 0, brk = (K('arrowdown') || K('s') || touchBtn.brk) ? 1 : 0;
-  // digital steering ramps in; less lock at speed when the steering assist is on
-  const v = c.speed || 0, lim = settings.steerAssist ? 1 / (1 + v / 250) : 1;
-  kSteer = st ? clamp(kSteer + Math.sign(st - kSteer) * h * 5, -1, 1) : kSteer * Math.exp(-h * 12);
-  if (st && Math.abs(kSteer - st) < h * 5) kSteer = st;
-  let steer = kSteer * lim;
-  if (pad.active || Math.abs(pad.steer) > 0.05) { steer += pad.steer * Math.abs(pad.steer) ** 0.4 * (settings.steerAssist ? lim * 1.1 : 1); thr = Math.max(thr, pad.thr); brk = Math.max(brk, pad.brk); }
-  if (settings.tilt && tiltRaw != null && document.body.classList.contains('touchui')) { if (tiltCal == null) tiltCal = tiltRaw; steer += clamp((tiltRaw - tiltCal) / 24, -1, 1) * (settings.tiltInvert ? -1 : 1) * (settings.steerAssist ? Math.max(lim, 0.55) : 1); }
+  // digital steering ramps in quickly (full lock in ~0.12 s) and snaps back to centre; the physics scales lock with speed
+  if (dbgBot) { const b = dbgBot(c); st = b.steer; thr = b.thr; brk = b.brk; }
+  kSteer = st ? clamp(kSteer + Math.sign(st - kSteer) * h * 8.5, -1, 1) : kSteer * Math.exp(-h * 16);
+  if (st && Math.abs(kSteer - st) < h * 8.5) kSteer = st;
+  if (st && Math.sign(st) !== Math.sign(kSteer) && kSteer) kSteer *= Math.exp(-h * 18); // reversing direction: drop the old lock fast
+  let steer = kSteer;
+  if (pad.active || Math.abs(pad.steer) > 0.05) { steer += Math.sign(pad.steer) * Math.abs(pad.steer) ** 1.2; thr = Math.max(thr, pad.thr); brk = Math.max(brk, pad.brk); }
+  if (settings.tilt && tiltRaw != null && document.body.classList.contains('touchui')) { if (tiltCal == null) tiltCal = tiltRaw; const d = (tiltRaw - tiltCal) * (settings.tiltInvert ? -1 : 1), dz = Math.sign(d) * Math.max(0, Math.abs(d) - 1.5) / 20; tiltS = lerp(tiltS, clamp(dz, -1, 1), clamp(h * 20, 0, 1)); steer += Math.sign(tiltS) * Math.abs(tiltS) ** 1.15; }
+  inp.brkRaw = brk; inp.human = true; inp.drift = K('x') || K('control') || !!touchBtn.drift;
   inp.steer = clamp(steer, -1, 1); inp.throttle = thr; inp.brake = brk; inp.boost = K(' ') || K('shift') || touchBtn.boost || pad.boost;
+}
+// steering assist (player only, on by default): nudges away from the barriers and eases off for corners taken far too fast
+function playerAssist(c) {
+  c.assist = 0; if (!settings.steerAssist || !R.env.racing || c.pit.state || c.finished) return;
+  const v = c.speed || 0, inp = c.input; if (v < 8) return;
+  const i = c.i, hT = T.H[i], R0 = -Math.cos(hT), R1 = Math.sin(hT), vlat = c.vx * R0 + c.vz * R1;
+  // predicted lateral position 0.5 s ahead, including how the road bends away under the car
+  const ahead = mod(i + Math.round(v * 0.5 / DS), T.n), bend = Math.atan2(Math.sin(T.H[ahead] - hT), Math.cos(T.H[ahead] - hT));
+  const pred = c.lat + vlat * 0.5 + bend * v * 0.25, lim = T.hw - 0.4;
+  if (Math.abs(pred) > lim && Math.sign(pred) === Math.sign(c.lat || pred)) {
+    const ex = Math.abs(pred) - lim, want = -Math.sign(pred);
+    const bias = want * clamp(0.15 + ex * 0.3, 0, c.drift === 1 ? 0.45 : 0.8);
+    if (Math.sign(inp.steer) !== want || Math.abs(inp.steer) < Math.abs(bias)) inp.steer = clamp(inp.steer + bias, -1, 1);
+    // already at full lock towards the inside and still running wide: lift and brake a little
+    if (inp.steer * want > 0.85 && ex > 0.3 && v > 14) { inp.throttle = Math.min(inp.throttle, 0.2); inp.brake = Math.max(inp.brake, clamp(ex * 0.25, 0.1, 0.5)); }
+    c.assist = 1;
+  }
+  // corner speed: compare with the braking profile for this car (a little more cautious than the AI's)
+  if (inp.brake < 0.1) {
+    const prof = assistProfile(c.stats, Math.round(carMu(c, R.env) * (c.off ? 0.6 : 1) * 50) / 50), k = mod(i + Math.round((2 + v * 0.35) / DS), T.n);
+    const over = v - prof[k] * 0.95 - (c.drift === 1 ? 2.5 : 0);
+    if (over > 0) { inp.throttle = Math.min(inp.throttle, over > 1.5 ? 0 : 0.5); if (over > 1.5) inp.brake = Math.max(inp.brake, clamp((over - 1.5) / 6, 0.15, 0.7)); c.assist = 2; }
+  }
 }
 function togglePitReq() { if (!R || R.tt && false) return; const P = R.player; if (P.pit.state) return; P.pit.req = !P.pit.req; if (!P.pit.nextTyre) P.pit.nextTyre = R.rain ? 'wet' : P.tyre === 'soft' ? 'medium' : 'soft'; flash(P.pit.req ? `PIT REQUESTED · ${TYRES[P.pit.nextTyre].name}s` : 'PIT CANCELLED', 'info'); Sound.click(); }
 function cyclePitTyre() { if (!R) return; const P = R.player, ks = Object.keys(TYRES); P.pit.nextTyre = ks[(ks.indexOf(P.pit.nextTyre || P.tyre) + 1) % ks.length]; flash(`PIT TYRE · ${TYRES[P.pit.nextTyre].name}`, 'info'); }

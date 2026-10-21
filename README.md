@@ -36,13 +36,14 @@ All cars, teams, drivers, circuits and liveries are fictional. There is no offic
   - Showroom to buy cars.
   - Workshop with 8 upgrades (engine, front wing, rear wing, tyres, brakes, suspension, gearbox and energy system), each with levels 1 to 10 costing 1k to 130k, and a preview of the stat change before you buy.
 - **Controls:**
-  - Keyboard: arrows or WASD, Space for boost, E/Q to shift, P to pit, T to pick the pit tyre, C to change camera and Esc to pause.
+  - Keyboard: arrows or WASD, X to drift, Space for boost, E/Q to shift, P to pit, T to pick the pit tyre, C to change camera and Esc to pause.
   - Gamepad.
   - Touch buttons: 4 sizes and a left-handed layout.
   - Optional tilt steering (asks for motion permission), with invert and re-centre options.
   - Fullscreen and landscape lock when you tap Start on phones.
+- **Handling (update 2):** arcade grip with speed-sensitive steering, so full lock always uses all the grip. Drift: hold a direction at speed and tap BRAKE (or press X); keep holding to slide round with tyre smoke and skid marks, let go to straighten up. Drifts over 0.6 s top up energy. Steering assist (on by default) eases off for corners taken far too fast and nudges the car away from the barriers. Barrier hits now slide the car along the wall and cost some speed instead of stopping it.
 - **Accessibility:** high-contrast HUD, colour-blind-friendly colours, reduced motion, screen-reader announcements (ARIA live region) and steering sensitivity.
-- **Graphics:** Auto, Low, Medium or High. Auto picks a level for the device and steps down if the frame rate stays below 32 fps. High adds shadows, PBR reflections and bloom.
+- **Graphics:** Auto, Low, Medium or High. Auto picks a level for the device. Rendering uses the device pixel ratio up to 2x with antialiasing; if the frame rate stays low, Auto first trims the resolution slightly, then steps down a level. High adds shadows, PBR reflections and bloom.
 - **Sound:** a synthesised WebAudio engine that follows rpm and throttle, plus tyre squeal, wind, rain, boost, start lights and pit beeps. No audio files are used.
 
 ## Not in V1 (needs a backend)

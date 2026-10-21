@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------- vehicle physics (arcade-sim, shared by player and AI: no AI cheats)
-const WHEELBASE = 3.4, GEAR_R = [0.3, 0.42, 0.53, 0.63, 0.73, 0.82, 0.91, 1.0], CAR_R = 1.0;
+const ARC = 1.45, WHEELBASE = 3.4, GEAR_R = [0.3, 0.42, 0.53, 0.63, 0.73, 0.82, 0.91, 1.0], CAR_R = 1.0;
 const _tp = { x: 0, y: 0, z: 0, h: 0 };
 function makeCar(o) {
   return Object.assign({ x: 0, y: 0, z: 0, h: 0, vx: 0, vz: 0, speed: 0, launchT: 0, launchK: 1, vLong: 0, vLat: 0, yaw: 0, steer: 0, throttle: 0, brake: 0, gear: 1, rpm: 4000, shiftT: 0,
@@ -59,27 +59,69 @@ function stepCar(c, dt, env) {
   else if (inp.brake > 0.3 && thr < 0.1 && env.racing) vLong = Math.max(-6, vLong - 4 * dt); // reverse to recover
   else vLong += (aDrive - (vLong < 0 ? -aBrake : aBrake) * 0 + aGrav * 0.2) * dt;
   if (vLong < 0 && inp.brake < 0.3 && thr > 0) vLong += 6 * dt;
-  // ---- steering / lateral
+  // ---- steering / lateral (arcade grip, speed-sensitive lock, optional drift)
   const sens = c.isPlayer ? settings.sens : 1;
-  let st = clamp(inp.steer * sens, -1, 1); c.steer = lerp(c.steer, st, clamp(dt * 14, 0, 1));
-  const delta = c.steer * (0.42 / (1 + Math.abs(vLong) / 22)) * s.turn * (c.lock ? 0.3 : 1);
-  let yaw = -vLong * Math.tan(delta) / WHEELBASE;
-  const req = Math.abs(yaw * vLong);
-  if (req > latMax) { const k = latMax / req; if (auto.steerAssist) yaw *= Math.min(1, k * (c.isPlayer ? 1.12 : 1.04)); else { yaw *= lerp(k, 1, 0.2); vLong -= (req - latMax) * 0.04 * dt; vLat += -Math.sign(c.steer) * (req - latMax) * 0.35 * dt; } }
-  const relax = (auto.steerAssist ? 9 : 5.5) * mu * (c.off ? 0.5 : 1);
-  vLat *= Math.exp(-relax * dt);
-  if (c.kerb && v > 20) vLat += (Math.random() - 0.5) * 0.6 * s.offPen;
-  c.yaw = yaw; c.h += yaw * dt;
-  const nf0 = Math.sin(c.h), nf1 = Math.cos(c.h), nr0 = -Math.cos(c.h), nr1 = Math.sin(c.h);
-  c.vx = nf0 * vLong + nr0 * vLat; c.vz = nf1 * vLong + nr1 * vLat; c.vLong = vLong; c.vLat = vLat;
+  let st = clamp(inp.steer * sens, -1, 1); c.steer = lerp(c.steer, st, clamp(dt * 16, 0, 1));
+  const vA = Math.abs(vLong), latA = latMax * ARC;
+  // geometric yaw at full lock (fades with speed) vs the grip-limited yaw: steering input scales the smaller of the two,
+  // so a partial input gives a partial turn at any speed and full lock always uses all the available grip
+  const geomYaw = vA * Math.tan(0.46 / (1 + vA / 26) * s.turn) / WHEELBASE, gripYaw = latA * (auto.steerAssist ? 1.08 : 1) / Math.max(vA, 1);
+  let yaw, req; c.yawMax = Math.min(geomYaw, gripYaw);
+  // drift: brake tap (or the drift key) while turning hard at speed breaks the rear loose
+  const brkOn = (inp.brkRaw ?? inp.brake) > 0.4, tapped = !brkOn && c.brkHold > 0.02 && c.brkHold < 0.35; c.brkHold = brkOn ? (c.brkHold || 0) + dt : 0;
+  if (c.isPlayer && inp.human && !c.drift && env.racing && v > 16 && Math.abs(c.steer) > 0.7 && !c.off && (inp.drift || (settings.driftTap !== false && tapped))) {
+    c.drift = 1; c.driftDir = Math.sign(c.steer); c.driftB = Math.min(0.12, Math.abs(Math.atan2(vLat, Math.max(1, vLong)))); c.driftT = 0; c.driftLow = 0; if (typeof onDrift === 'function') onDrift(c, 1);
+  }
+  if (c.drift) {
+    const dir = c.driftDir, along = c.steer * dir;
+    c.driftT += dt;
+    if (c.drift === 1) { c.driftLow = along < 0.25 ? c.driftLow + dt : 0; if (c.driftLow > 0.16 || v < 9 || c.off) c.drift = 2; }
+    const bT = c.drift === 1 ? 0.28 + 0.24 * clamp(along, 0, 1) + (thr > 0.5 ? 0.05 : 0) : 0;
+    c.driftB += (bT - c.driftB) * clamp(dt * (c.drift === 1 ? 4.5 : 8), 0, 1);
+    // the velocity vector turns on (slightly more than) the grip limit; the slide scrubs speed
+    const turnK = c.drift === 1 ? 0.85 + 0.6 * clamp(along, 0, 1) : 1.05, vNow = Math.hypot(vLong, vLat);
+    const om = c.drift === 1 ? -dir * latA * turnK / Math.max(vNow, 6) : -c.steer * Math.min(geomYaw, gripYaw); // recovering: normal steering control
+    const psi = Math.atan2(c.vx, c.vz) + om * dt;
+    const vNew = Math.max(0, vNow - (1.5 + 7 * c.driftB) * dt - 0.3 * Math.max(0, aDrive) * dt);
+    const h0 = c.h; c.h = psi - dir * c.driftB;
+    yaw = Math.atan2(Math.sin(c.h - h0), Math.cos(c.h - h0)) / dt; req = latA * turnK;
+    c.vx = Math.sin(psi) * vNew; c.vz = Math.cos(psi) * vNew;
+    const f0b = Math.sin(c.h), f1b = Math.cos(c.h); vLong = c.vx * f0b + c.vz * f1b; vLat = c.vx * -f1b + c.vz * f0b;
+    if (c.drift === 2 && c.driftB < 0.02) { c.drift = 0; if (typeof onDrift === 'function') onDrift(c, 0); }
+    c.yaw = yaw;
+  } else {
+    if (auto.steerAssist) { yaw = -c.steer * Math.min(geomYaw, gripYaw) * Math.sign(vLong); req = Math.abs(yaw * vLong); }
+    else {
+      yaw = -c.steer * geomYaw * Math.sign(vLong); req = Math.abs(yaw * vLong);
+      if (req > latA * 1.04) { const ex = req - latA * 1.04; yaw *= latA * 1.04 / req; vLong -= Math.min(ex, 25) * 0.05 * dt; vLat += -Math.sign(c.steer) * Math.min(ex, 25) * 0.12 * dt; req = latA * 1.04; } // understeer: scrubs speed and pushes wide
+    }
+    if (c.lock) yaw *= 0.3;
+    const relax = (auto.steerAssist ? 9 : 5.5) * mu * (c.off ? 0.5 : 1);
+    vLat *= Math.exp(-relax * dt);
+    if (c.kerb && v > 20) vLat += (Math.random() - 0.5) * 0.6 * s.offPen;
+    c.yaw = yaw; c.h += yaw * dt;
+    const nf0 = Math.sin(c.h), nf1 = Math.cos(c.h), nr0 = -Math.cos(c.h), nr1 = Math.sin(c.h);
+    c.vx = nf0 * vLong + nr0 * vLat; c.vz = nf1 * vLong + nr1 * vLat;
+  }
+  c.vLong = vLong; c.vLat = vLat;
+  c.aLong = lerp(c.aLong || 0, (vLong - (c.pvLong ?? vLong)) / dt, clamp(dt * 8, 0, 1)); c.pvLong = vLong;
   c.x += c.vx * dt; c.z += c.vz * dt;
-  // ---- barriers
-  const wall = T.wall;
-  if (Math.abs(c.lat) > wall) {
-    const h = T.H[c.i], R0 = -Math.cos(h), R1 = Math.sin(h), sg = Math.sign(c.lat), push = Math.abs(c.lat) - wall;
+  // ---- barriers: slide along the wall, lose some speed, never stop dead
+  const wall = T.wall, latNow = trackLocal(c.i, c.x, c.z).lat;
+  if (Math.abs(latNow) > wall) {
+    const h = T.H[c.i], R0 = -Math.cos(h), R1 = Math.sin(h), sg = Math.sign(latNow), push = Math.abs(latNow) - wall;
     c.x -= R0 * sg * push; c.z -= R1 * sg * push;
-    const vr = (c.vx * R0 + c.vz * R1) * sg; if (vr > 0) { c.vx -= R0 * sg * vr * 1.3; c.vz -= R1 * sg * vr * 1.3; c.vx *= 0.8; c.vz *= 0.8; if (c.isPlayer && vr > 3) onPlayerHit('BARRIER', vr); }
-    c.h = c.h + Math.atan2(Math.sin(h - c.h), Math.cos(h - c.h)) * 0.08;
+    const vr = (c.vx * R0 + c.vz * R1) * sg;
+    if (vr > 0) {
+      const tx = c.vx - R0 * sg * vr, tz = c.vz - R1 * sg * vr, keep = clamp(1 - vr * 0.022, 0.62, 0.99);
+      c.vx = tx * keep - R0 * sg * vr * 0.15; c.vz = tz * keep - R1 * sg * vr * 0.15;
+      if (c.drift) c.drift = 2;
+      if (c.isPlayer) { c.wallHits = (c.wallHits || 0) + (vr > 3 ? 1 : 0); if (vr > 3) onPlayerHit('BARRIER', vr); }
+    } else { c.vx *= 1 - 0.25 * dt; c.vz *= 1 - 0.25 * dt; }
+    // nose turned into the wall: rotate it back parallel to the barrier
+    const fwdT = Math.sin(c.h) * Math.sin(h) + Math.cos(c.h) * Math.cos(h) >= 0 ? h : h + Math.PI, into = (Math.sin(c.h) * R0 + Math.cos(c.h) * R1) * sg;
+    if (into > 0) c.h += Math.atan2(Math.sin(fwdT - c.h), Math.cos(fwdT - c.h)) * clamp(dt * 9, 0, 0.2);
+    c.lat = sg * wall;
   }
   // ---- tyres wear (more when sliding / pushing)
   const load = clamp(req / Math.max(1, latMax), 0, 1.4) * 0.6 + thr * 0.25 + inp.brake * 0.25;
@@ -162,7 +204,9 @@ function aiDrive(c, cars, dt, env, diff) {
   trackPoint(j, tlat, _tp);
   const dx = _tp.x - c.x, dz = _tp.z - c.z, fw = dx * Math.sin(c.h) + dz * Math.cos(c.h), rt = dx * -Math.cos(c.h) + dz * Math.sin(c.h);
   const ang = Math.atan2(rt, Math.max(0.5, fw));
-  c.input.steer = clamp(ang * (2.4 + 20 / (v + 8)), -1, 1);
+  const Ld = Math.max(3, Math.hypot(dx, dz)), wDes = 2 * Math.max(v, 2) * Math.sin(ang) / Ld;
+  c.input.human = false;
+  c.input.steer = clamp(wDes / Math.max(0.05, c.yawMax || 1) * 1.05 + ang * 0.6, -1, 1);
   // speed control from the braking/cornering profile
   const k = mod(c.i + Math.round((3 + v * 0.18) / DS), n);
   let vt = ai.profile[k] * c.pace * (ai.mistakeT > 0 ? 1.1 : 1);
